@@ -1,20 +1,33 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Boolean, pool
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
 # PostgreSQL connection string (uses environment variable)
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "sqlite:///./sasds.db"  # Fallback to SQLite if PostgreSQL not available
+    "sqlite:///./sasds.db"
 )
 
-# Create engine
-engine = create_engine(
-    DATABASE_URL if "postgresql" in DATABASE_URL else "sqlite:///./sasds.db",
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+# Use StaticPool for SQLite, QueuePool with better settings for PostgreSQL
+if "postgresql" in DATABASE_URL:
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=pool.QueuePool,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,  # Test connections before using
+        pool_recycle=3600,   # Recycle connections every hour
+        connect_args={"connect_timeout": 10}
+    )
+else:
+    # SQLite with StaticPool to avoid connection issues
+    engine = create_engine(
+        "sqlite:///./sasds.db",
+        connect_args={"check_same_thread": False},
+        poolclass=pool.StaticPool
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

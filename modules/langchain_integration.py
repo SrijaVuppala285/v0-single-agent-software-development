@@ -3,7 +3,11 @@ from typing import Dict, List
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain.memory import ConversationBufferMemory
+from langchain.memory import ConversationSummaryMemory
+from langchain.memory.buffer import ConversationBufferMemory as LegacyBufferMemory
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class LangChainIntegration:
     """Handles LLM interactions using LangChain"""
@@ -16,7 +20,12 @@ class LangChainIntegration:
             temperature=0.7
         ) if api_key else None
         
-        self.memory = ConversationBufferMemory()
+        try:
+            # Try new approach first (if available in your LangChain version)
+            self.memory = ConversationSummaryMemory(llm=self.llm) if self.llm else None
+        except:
+            # Fallback for older versions
+            self.memory = None
     
     def analyze_requirement_with_langchain(self, requirement: str) -> Dict:
         """Use LangChain to analyze requirements"""
@@ -42,7 +51,7 @@ class LangChainIntegration:
         )
         
         try:
-            chain = LLMChain(llm=self.llm, prompt=prompt, memory=self.memory)
+            chain = LLMChain(llm=self.llm, prompt=prompt)
             response = chain.run(requirement=requirement)
             
             # Parse response
