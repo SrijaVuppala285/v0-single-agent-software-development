@@ -337,5 +337,5 @@ chmod 755 uploads
 **Error:** "Script disabled on system" (PowerShell)
 
 **Solution:**
-```powershell
+\`\`\`powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser

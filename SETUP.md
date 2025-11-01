@@ -79,6 +79,6 @@ venv\Scripts\activate
 \`\`\`
 
 **Windows (PowerShell):**
-```powershell
+\`\`\`powershell
 python -m venv venv
 venv\Scripts\Activate.ps1

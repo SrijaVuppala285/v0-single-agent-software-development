@@ -78,7 +78,7 @@ venv\Scripts\activate
 
 ### Using PowerShell
 
-```powershell
+\`\`\`powershell
 # Create virtual environment
 python -m venv venv
 

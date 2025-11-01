@@ -29,7 +29,7 @@ git --version
 \`\`\`
 
 **On Windows (PowerShell):**
-```powershell
+\`\`\`powershell
 # Check Python version (need 3.10+)
 python --version
 
