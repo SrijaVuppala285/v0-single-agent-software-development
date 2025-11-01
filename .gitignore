@@ -1,0 +1,56 @@
+# Environment
+.env
+.env.local
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+
+# Database
+*.db
+projects.db
+sasds.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Pytest
+.pytest_cache/
+htmlcov/
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Uploads directory
+uploads/
