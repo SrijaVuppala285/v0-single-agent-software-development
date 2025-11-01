@@ -27,7 +27,7 @@ chat_manager = ChatManager()
 file_manager = FileManager()
 langchain = LangChainIntegration()
 
-# Initialize session state
+# Initialize session state - MUST be done before any widget
 if "current_project" not in st.session_state:
     st.session_state.current_project = None
 if "current_session_id" not in st.session_state:
@@ -40,6 +40,8 @@ if "test_results" not in st.session_state:
     st.session_state.test_results = None
 if "review_report" not in st.session_state:
     st.session_state.review_report = None
+if "chat_title" not in st.session_state:
+    st.session_state.chat_title = "New Chat"
 
 # Initialize modules
 storage = ProjectStorage()
@@ -92,17 +94,17 @@ def render_header():
     st.markdown("**Build, test, and refine software automatically using AI powered by Google Gemini**")
 
 def render_sidebar_chat_history():
-    """Render chat history sidebar (ChatGPT-like interface)"""
+    """Render chat history sidebar (ChatGPT-like interface) - FIXED: No st.rerun() in sidebar"""
     with st.sidebar:
         st.markdown("## 💬 Chat History")
         
-        # New chat button
-        if st.button("➕ New Chat", use_container_width=True):
+        # New chat button - uses key to prevent duplicate rendering
+        if st.button("➕ New Chat", use_container_width=True, key="new_chat_btn"):
             session_id = chat_manager.create_session("New Chat")
             st.session_state.current_session_id = session_id
+            st.session_state.chat_title = "New Chat"
             st.session_state.analysis_result = None
             st.session_state.generated_code = None
-            st.rerun()
         
         st.markdown("---")
         
@@ -120,25 +122,30 @@ def render_sidebar_chat_history():
                             key=f"session_{session['id']}"
                         ):
                             st.session_state.current_session_id = session['id']
-                            st.rerun()
+                            st.session_state.chat_title = session['title']
                     
                     with col2:
                         if st.button("🗑️", key=f"del_session_{session['id']}"):
                             chat_manager.delete_session(session['id'])
                             if st.session_state.current_session_id == session['id']:
                                 st.session_state.current_session_id = None
-                            st.rerun()
+                                st.session_state.chat_title = "New Chat"
             else:
                 st.info("No chat history yet")
         except Exception as e:
             st.error(f"Error loading chat history: {str(e)}")
-            st.info("Try refreshing the page or clearing browser cache")
+            st.info("Try refreshing the page")
 
 def render_chat_interface():
     """Render ChatGPT-like chat interface"""
     
+    # Initialize session if needed
     if not st.session_state.current_session_id:
         st.session_state.current_session_id = chat_manager.create_session("New Chat")
+        st.session_state.chat_title = "New Chat"
+    
+    # Display chat title
+    st.markdown(f"## 💬 {st.session_state.chat_title}")
     
     # Display chat messages
     try:
@@ -148,42 +155,59 @@ def render_chat_interface():
             with st.chat_message(msg['role']):
                 st.write(msg['content'])
     except Exception as e:
-        st.error(f"Error loading messages: {str(e)}")
+        st.warning(f"Could not load messages: {str(e)}")
         messages = []
     
     # Chat input
     if prompt := st.chat_input("Enter your requirement or ask a question..."):
         try:
-            # Add user message
+            # Add user message to chat
             chat_manager.add_message(st.session_state.current_session_id, "user", prompt)
             
             # Get AI response
             with st.spinner("Analyzing..."):
-                analysis = langchain.analyze_requirement_with_langchain(prompt)
-                st.session_state.analysis_result = analysis
-                
-                # Create response
-                response_text = f"""
-**Analysis Complete!**
+                try:
+                    analysis = langchain.analyze_requirement_with_langchain(prompt)
+                    st.session_state.analysis_result = analysis
+                    
+                    # Create response
+                    tasks_text = "\n".join([f"- {task}" for task in analysis.get("tasks", [])])
+                    response_text = f"""**Analysis Complete!**
 
 **Tasks:**
-{chr(10).join([f"- {task}" for task in analysis.get("tasks", [])])}
+{tasks_text}
 
-**Libraries:** {', '.join(analysis.get("libraries", []))}
+**Libraries:** {', '.join(analysis.get("libraries", [])) or "None"}
 
-**Constraints:** {analysis.get("constraints", "None")}
-                """
-                
-                # Add assistant message
-                chat_manager.add_message(st.session_state.current_session_id, "assistant", response_text)
-                
-                st.rerun()
+**Constraints:** {analysis.get("constraints", "None")}"""
+                    
+                    # Add assistant message
+                    chat_manager.add_message(st.session_state.current_session_id, "assistant", response_text)
+                    
+                except Exception as analysis_error:
+                    error_msg = f"Error during analysis: {str(analysis_error)}"
+                    st.error(error_msg)
+                    chat_manager.add_message(st.session_state.current_session_id, "assistant", error_msg)
+        
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
 def render_requirement_input():
-    """Render requirement input section"""
+    """Render requirement input section with title input"""
     st.subheader("📦 New Project")
+    
+    col_title_1, col_title_2 = st.columns([1, 1])
+    with col_title_1:
+        st.markdown("#### Project Title:")
+        project_title = st.text_input(
+            "Give your project a name",
+            placeholder="e.g., Student Grade Analyzer",
+            label_visibility="collapsed",
+            key="project_title_input"
+        )
+    
+    with col_title_2:
+        pass
     
     col1, col2 = st.columns([1, 1])
     
@@ -218,7 +242,6 @@ def render_requirement_input():
         st.session_state.generated_code = None
         st.session_state.test_results = None
         st.session_state.review_report = None
-        st.rerun()
     
     if analyze_btn:
         if not requirement_text and not uploaded_file:
@@ -237,12 +260,16 @@ def render_requirement_input():
                 input_text += f"\n\n[Uploaded file: {uploaded_file.name}]\n{file_content.decode('utf-8', errors='ignore')[:1000]}"
             except Exception as e:
                 st.error(f"Error uploading file: {str(e)}")
+                return
         
         with st.spinner("Analyzing requirement..."):
             try:
                 st.session_state.analysis_result = langchain.analyze_requirement_with_langchain(input_text)
+                
+                final_title = project_title or "New Project"
+                
                 st.session_state.current_project = {
-                    "title": "New Project",
+                    "title": final_title,
                     "requirement": input_text[:200],
                     "created_at": datetime.now().isoformat(),
                     "version": 1
@@ -255,16 +282,22 @@ def render_requirement_input():
                         requirement_text[:500]
                     )
                     
-                    response_msg = f"**Analysis Complete!**\n\nIdentified tasks: {', '.join(st.session_state.analysis_result.get('tasks', [])[:3])}"
+                    response_msg = f"**Analysis Complete!**\n\nProject: **{final_title}**\n\nIdentified tasks: {', '.join(st.session_state.analysis_result.get('tasks', [])[:3])}"
                     chat_manager.add_message(
                         st.session_state.current_session_id,
                         "assistant",
                         response_msg
                     )
+                    
+                    # Update session title with project title
+                    chat_manager.update_session_title(st.session_state.current_session_id, final_title)
+                    st.session_state.chat_title = final_title
+                
+                st.success(f"✅ Analysis complete for: {final_title}")
             except Exception as e:
                 st.error(f"Error analyzing requirement: {str(e)}")
     
-    return requirement_text, uploaded_file
+    return requirement_text, uploaded_file, project_title
 
 def render_analysis_result():
     """Render analysis results"""
@@ -293,28 +326,42 @@ def render_code_generation():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("⚙ Generate Code", use_container_width=True):
+            if st.button("⚙️ Generate Code", use_container_width=True, key="gen_code_btn"):
                 with st.spinner("Generating code..."):
                     try:
                         st.session_state.generated_code = generator.generate(
                             st.session_state.analysis_result
                         )
+                        st.success("✅ Code generated successfully!")
                     except Exception as e:
                         st.error(f"Error generating code: {str(e)}")
         
         with col2:
-            if st.session_state.generated_code and st.button("🧪 Run Tests", use_container_width=True):
-                with st.spinner("Running tests..."):
+            if st.session_state.generated_code and st.button("🧪 Run Tests", use_container_width=True, key="run_tests_btn"):
+                with st.spinner("Generating and running tests..."):
                     try:
                         st.session_state.test_results = tester.run_tests(
                             st.session_state.generated_code
                         )
+                        
+                        # Display results immediately
+                        test_res = st.session_state.test_results
+                        if test_res:
+                            st.success(f"✅ Tests Complete! Passed: {test_res.get('passed', 0)}, Failed: {test_res.get('failed', 0)}")
+                        
                     except Exception as e:
                         st.error(f"Error running tests: {str(e)}")
+                        st.session_state.test_results = {
+                            "passed": 0,
+                            "failed": 1,
+                            "success_rate": 0,
+                            "log": f"Error: {str(e)}",
+                            "failures": str(e)
+                        }
         
         with col3:
-            if st.session_state.generated_code and st.button("🔁 Review & Refine", use_container_width=True):
-                with st.spinner("Reviewing and refining..."):
+            if st.session_state.generated_code and st.button("🔁 Review & Refine", use_container_width=True, key="review_btn"):
+                with st.spinner("Reviewing and refining code..."):
                     try:
                         test_results = st.session_state.test_results or {
                             "passed": 0,
@@ -326,14 +373,15 @@ def render_code_generation():
                             st.session_state.generated_code,
                             test_results
                         )
+                        st.success("✅ Review complete!")
                     except Exception as e:
                         st.error(f"Error in review process: {str(e)}")
 
 def render_output_console():
-    """Render the output console"""
+    """Render the output console with all tabs"""
     st.subheader("💻 Output Console")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Generated Code", "Test Results", "Review Report", "All Files", "Download Package"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Generated Code", "Test Results", "Review Report", "Code Output", "Download Package"])
     
     with tab1:
         if st.session_state.generated_code:
@@ -342,13 +390,14 @@ def render_output_console():
                 label="Download Code",
                 data=st.session_state.generated_code,
                 file_name="main.py",
-                mime="text/plain"
+                mime="text/plain",
+                key="dl_main_code"
             )
         else:
-            st.info("Generated code will appear here")
+            st.info("Generated code will appear here after clicking 'Generate Code'")
     
     with tab2:
-        if st.session_state.test_results is not None:
+        if st.session_state.test_results is not None and isinstance(st.session_state.test_results, dict):
             results = st.session_state.test_results
             
             col1, col2, col3 = st.columns(3)
@@ -357,64 +406,108 @@ def render_output_console():
             with col2:
                 st.metric("Tests Failed", results.get("failed", 0))
             with col3:
-                st.metric("Success Rate", f"{results.get('success_rate', 0):.1f}%")
+                success_rate = results.get("success_rate", 0)
+                st.metric("Success Rate", f"{success_rate:.1f}%")
+            
+            st.markdown("---")
             
             if results.get("failed", 0) > 0:
                 st.markdown("<div class='error-box'>", unsafe_allow_html=True)
                 st.write("**Failed Tests:**")
-                st.write(results.get("failures", ""))
+                failures = results.get("failures", "")
+                if failures:
+                    st.write(failures)
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div class='success-box'>", unsafe_allow_html=True)
                 st.write("✅ All tests passed!")
                 st.markdown("</div>", unsafe_allow_html=True)
             
-            st.code(results.get("log", ""), language="text")
+            st.markdown("#### Test Log:")
+            test_log = results.get("log", "")
+            if test_log:
+                st.code(test_log, language="text")
+            else:
+                st.info("No test log available")
         else:
-            st.info("Test results will appear here")
+            st.info("Test results will appear here after clicking 'Run Tests'")
     
     with tab3:
         if st.session_state.review_report:
             report = st.session_state.review_report
-            st.write(report.get("summary", ""))
             
-            if report.get("improvements"):
-                st.markdown("#### Improvements Made:")
-                for improvement in report["improvements"]:
-                    st.write(f"• {improvement}")
-            
-            if report.get("refined_code"):
-                st.code(report["refined_code"], language="python")
-                st.download_button(
-                    label="Download Refined Code",
-                    data=report["refined_code"],
-                    file_name="main_refined.py",
-                    mime="text/plain"
-                )
+            if isinstance(report, dict):
+                summary = report.get("summary", "")
+                if summary:
+                    st.write(summary)
+                
+                if report.get("improvements"):
+                    st.markdown("#### Improvements Made:")
+                    for improvement in report["improvements"]:
+                        st.write(f"• {improvement}")
+                
+                if report.get("refined_code"):
+                    st.markdown("#### Refined Code:")
+                    st.code(report["refined_code"], language="python")
+                    st.download_button(
+                        label="Download Refined Code",
+                        data=report["refined_code"],
+                        file_name="main_refined.py",
+                        mime="text/plain",
+                        key="dl_refined_code"
+                    )
+            else:
+                st.write(report)
         else:
-            st.info("Review report will appear here")
+            st.info("Review report will appear here after clicking 'Review & Refine'")
     
     with tab4:
+        st.markdown("#### Program Output")
+        
         if st.session_state.generated_code:
-            files = {
-                "main.py": st.session_state.generated_code,
-                "test_main.py": f"# Generated test file\n# {st.session_state.test_results.get('log', 'Tests pending') if st.session_state.test_results else 'Tests pending'}",
-            }
-            
-            if st.session_state.review_report:
-                files["review_report.txt"] = st.session_state.review_report.get("summary", "")
-            
-            st.json(files)
+            if st.button("▶️ Run Code & Show Output", use_container_width=True, key="run_code_output"):
+                with st.spinner("Executing code..."):
+                    try:
+                        import tempfile
+                        import subprocess
+                        
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                            f.write(st.session_state.generated_code)
+                            f.flush()
+                            temp_file = f.name
+                        
+                        result = subprocess.run(
+                            ["python", temp_file],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        
+                        os.unlink(temp_file)
+                        
+                        st.markdown("##### Output:")
+                        if result.stdout:
+                            st.code(result.stdout, language="text")
+                        else:
+                            st.info("No output generated")
+                        
+                        if result.stderr:
+                            st.markdown("##### Errors/Warnings:")
+                            st.code(result.stderr, language="text")
+                    
+                    except subprocess.TimeoutExpired:
+                        st.error("❌ Code execution timed out (>10 seconds)")
+                    except Exception as e:
+                        st.error(f"❌ Error executing code: {str(e)}")
         else:
-            st.info("No files generated yet")
+            st.info("Generate code first to see output")
     
     with tab5:
         st.markdown("### Download Complete Project Package")
         st.markdown("Download all generated files, requirements, and configuration as a ZIP package.")
         
-        if st.button("📦 Download Package", use_container_width=True):
+        if st.button("📦 Download Package", use_container_width=True, key="download_pkg"):
             try:
-                # Create ZIP file
                 zip_buffer = io.BytesIO()
                 
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -422,16 +515,17 @@ def render_output_console():
                     if st.session_state.generated_code:
                         zip_file.writestr("main.py", st.session_state.generated_code)
                     
-                    if st.session_state.test_results:
+                    if st.session_state.test_results and isinstance(st.session_state.test_results, dict):
                         test_log = st.session_state.test_results.get("log", "No tests run")
                         zip_file.writestr("test_results.txt", test_log)
                     
                     if st.session_state.review_report:
-                        review_summary = st.session_state.review_report.get("summary", "")
-                        zip_file.writestr("review_report.txt", review_summary)
-                        
-                        if st.session_state.review_report.get("refined_code"):
-                            zip_file.writestr("main_refined.py", st.session_state.review_report["refined_code"])
+                        if isinstance(st.session_state.review_report, dict):
+                            review_summary = st.session_state.review_report.get("summary", "")
+                            zip_file.writestr("review_report.txt", review_summary)
+                            
+                            if st.session_state.review_report.get("refined_code"):
+                                zip_file.writestr("main_refined.py", st.session_state.review_report["refined_code"])
                     
                     # Add requirements.txt
                     if st.session_state.analysis_result:
@@ -440,14 +534,15 @@ def render_output_console():
                         zip_file.writestr("requirements.txt", requirements_content)
                     
                     # Add README.md
-                    readme = """# Generated Project
+                    project_title = st.session_state.current_project.get("title", "Generated Project") if st.session_state.current_project else "Generated Project"
+                    readme = f"""# {project_title}
 
 ## Overview
 This is an auto-generated Python project using SASDS (Single Agent Software Development System).
 
 ## Files
 - main.py - Main generated code
-- main_refined.py - Refined version after review
+- main_refined.py - Refined version after review (if available)
 - test_results.txt - Test execution results
 - review_report.txt - Code review report
 - requirements.txt - Python dependencies
@@ -458,8 +553,8 @@ This is an auto-generated Python project using SASDS (Single Agent Software Deve
 3. Run tests: pytest test_main.py
 
 ## Generated At
+{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-                    readme += f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                     zip_file.writestr("README.md", readme)
                     
                     # Add .gitignore
@@ -491,29 +586,28 @@ venv/
                     
                     # Add project metadata
                     metadata = {
+                        "project_title": project_title,
                         "generated_at": datetime.now().isoformat(),
                         "analysis": st.session_state.analysis_result or {},
                         "test_summary": {
-                            "passed": st.session_state.test_results.get("passed", 0) if st.session_state.test_results else 0,
-                            "failed": st.session_state.test_results.get("failed", 0) if st.session_state.test_results else 0,
+                            "passed": st.session_state.test_results.get("passed", 0) if st.session_state.test_results and isinstance(st.session_state.test_results, dict) else 0,
+                            "failed": st.session_state.test_results.get("failed", 0) if st.session_state.test_results and isinstance(st.session_state.test_results, dict) else 0,
                         }
                     }
                     zip_file.writestr("project_metadata.json", json.dumps(metadata, indent=2))
                 
-                # Download button
                 zip_buffer.seek(0)
                 st.download_button(
-                    label="Download ZIP Package",
+                    label="📥 Download ZIP Package",
                     data=zip_buffer.getvalue(),
-                    file_name=f"sasds_project_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                    mime="application/zip"
+                    file_name=f"sasds_{project_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    key="download_zip"
                 )
-                st.success("Package ready for download!")
+                st.success("✅ Package ready for download!")
             
             except Exception as e:
                 st.error(f"Error creating package: {str(e)}")
-        else:
-            st.info("Click 'Download Package' to create a ZIP file with all generated files.")
 
 def render_recent_projects():
     """Render recent projects section"""
@@ -530,7 +624,6 @@ def render_recent_projects():
                     
                     if st.button(f"Open Project", key=f"project_{project['id']}"):
                         st.session_state.current_project = project
-                        st.rerun()
         else:
             st.info("No projects yet. Create your first project!")
     except Exception as e:
@@ -545,18 +638,16 @@ def main():
     col1, col2 = st.columns([3, 1])
     
     with col2:
-        if st.button("🏠 Home", use_container_width=True):
+        if st.button("🏠 Home", use_container_width=True, key="home_btn"):
             st.session_state.current_project = None
-            st.rerun()
     
     st.markdown("---")
     
-    view_mode = st.radio("View Mode:", ["Chat Interface", "Project Builder"], horizontal=True)
+    view_mode = st.radio("View Mode:", ["Chat Interface", "Project Builder"], horizontal=True, key="view_mode_radio")
     
     if view_mode == "Chat Interface":
         render_chat_interface()
     else:
-        # Main content
         render_requirement_input()
         render_analysis_result()
         
